@@ -1,0 +1,42 @@
+{
+  "name": "llm-router",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted OpenAI-compatible router with auto virtual models for existing relay APIs.",
+  "keywords": [
+    "llm-router",
+    "openai-compatible",
+    "model-routing",
+    "ai-gateway",
+    "llm-proxy",
+    "auto-model",
+    "typescript",
+    "streaming",
+    "function-calling",
+    "multimodal"
+  ],
+  "homepage": "https://github.com/study8677/llm-router#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/study8677/llm-router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/study8677/llm-router/issues"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "test": "node --test --import tsx test/*.test.ts",
+    "test:live-routing": "tsx scripts/live-routing-eval.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
