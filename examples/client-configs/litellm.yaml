@@ -1,0 +1,16 @@
+model_list:
+  - model_name: llm-router-auto
+    litellm_params:
+      model: openai/auto
+      api_base: http://127.0.0.1:8787/v1
+      api_key: local-router-key
+  - model_name: llm-router-coding
+    litellm_params:
+      model: openai/auto-coding
+      api_base: http://127.0.0.1:8787/v1
+      api_key: local-router-key
+  - model_name: llm-router-longtext
+    litellm_params:
+      model: openai/auto-longtext
+      api_base: http://127.0.0.1:8787/v1
+      api_key: local-router-key

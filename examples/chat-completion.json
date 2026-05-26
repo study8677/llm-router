@@ -1,0 +1,9 @@
+{
+  "model": "auto",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain binary search in one paragraph."
+    }
+  ]
+}

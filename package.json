@@ -1,9 +1,9 @@
 {
   "name": "llm-router",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Self-hosted OpenAI-compatible router with auto virtual models for existing relay APIs.",
+  "license": "MIT",
   "keywords": [
     "llm-router",
     "openai-compatible",
@@ -26,8 +26,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
+    "check": "npm run build && npm test",
     "test": "node --test --import tsx test/*.test.ts",
     "test:live-routing": "tsx scripts/live-routing-eval.ts"
   },

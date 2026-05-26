@@ -1,0 +1,10 @@
+{
+  "model": "auto-coding",
+  "stream": true,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a small TypeScript debounce function."
+    }
+  ]
+}

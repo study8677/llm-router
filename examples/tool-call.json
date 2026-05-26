@@ -1,0 +1,28 @@
+{
+  "model": "auto",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Look up order ord_123 if needed."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_order",
+        "description": "Look up an order by id.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}
