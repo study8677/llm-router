@@ -4,6 +4,14 @@ All notable changes to LLM Router will be documented in this file.
 
 The project follows a lightweight changelog style until the first stable release.
 
+## 0.1.1
+
+- Added local Admin page at `/admin`.
+- Added runtime router-model selection for `auto`, `auto-coding`, and `auto-longtext`.
+- Added local `.llm-router.local.json` runtime config persistence.
+- Added protected `/admin/config` API for reading and saving router settings.
+- Added tests for manual router-model selection, Admin API auth, and unavailable saved models.
+
 ## 0.1.0
 
 - Added OpenAI-compatible `POST /v1/chat/completions`.

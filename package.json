@@ -1,6 +1,6 @@
 {
   "name": "llm-router",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Self-hosted OpenAI-compatible router with auto virtual models for existing relay APIs.",
   "license": "MIT",
