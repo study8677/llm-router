@@ -56,6 +56,14 @@ npm run build
 npm start
 ```
 
+打开本地配置页：
+
+```text
+http://127.0.0.1:8787/admin
+```
+
+这里可以查看上游模型、当前生效的路由模型，并把 `auto` 使用的路由模型从“自动选择最便宜已知价格模型”改成“手动指定某个模型”。配置会保存到 `.llm-router.local.json`。
+
 客户端改成：
 
 ```bash
@@ -87,7 +95,7 @@ model=auto
 ```mermaid
 flowchart LR
   Client["Client / SDK"] --> Router["LLM Router"]
-  Router --> RouteModel["Cheapest priced router model"]
+  Router --> RouteModel["Router model<br/>auto cheapest or manual"]
   RouteModel --> Decision["Routing JSON"]
   Decision --> Router
   Router --> AnswerModel["Selected answer model"]
@@ -96,7 +104,7 @@ flowchart LR
 
 路由是两阶段完成的：
 
-1. 便宜路由模型读取原始请求、候选模型、价格、能力提示和当前虚拟模式，输出结构化路由决策。
+1. 路由模型读取原始请求、候选模型、价格、能力提示和当前虚拟模式，输出结构化路由决策。默认使用最便宜且价格已知的模型，也可以在本地 Admin 页手动指定。
 2. 回答模型独立处理原始请求。即使路由模型和回答模型是同一个 ID，也会再调用一次，不复用路由内容。
 
 遇到 timeout、network error、`429`、`5xx` 时，自动路由会按配置重新路由并重试。流式响应只有在上游还没吐出 chunk 前才能 fallback；一旦已经发给客户端，就不能安全换模型。
@@ -168,6 +176,16 @@ x-llm-router-target-model
 - 复杂长文本推理、高风险分析：选择最强前沿模型，并使用 `high` 或 `xhigh`。
 
 模型池、价格、能力标签和重试行为都可以通过配置调整。配置入口见 [Configuration](docs/CONFIGURATION.md)。
+
+## 本地 Admin
+
+访问 `http://127.0.0.1:8787/admin` 可以配置 auto 路由第一跳使用的“路由模型”：
+
+- **自动选择**：默认模式，从上游模型列表中选择价格已知且最便宜的模型做路由。
+- **手动指定**：固定使用你选择的某个上游模型做路由，适合你希望路由判断也更聪明的场景。
+- 如果设置了 `ROUTER_API_KEY`，页面会要求输入这个本地 Key 才能读取或保存配置。
+
+这只影响路由判断模型，不会把它当成最终回答复用。最终回答仍然由路由 JSON 选出的目标模型单独调用。
 
 ## 多模态和工具调用
 

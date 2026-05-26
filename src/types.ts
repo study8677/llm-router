@@ -7,6 +7,7 @@ export interface AppConfig {
   upstreamBaseUrl: string;
   upstreamApiKey: string;
   routerApiKey?: string;
+  runtimeConfigPath: string;
   upstreamTimeoutMs: number;
   autoMaxAttempts: number;
 }
@@ -27,6 +28,14 @@ export interface ModelPrice {
 export interface PricedModel {
   model: OpenAIModel;
   price?: ModelPrice;
+}
+
+export interface RuntimeRouterConfig {
+  routerModelId?: string;
+}
+
+export interface RuntimeConfigProvider {
+  get(): RuntimeRouterConfig;
 }
 
 export interface ChatCompletionRequest {

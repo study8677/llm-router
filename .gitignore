@@ -3,4 +3,6 @@ dist/
 .env
 .env.*
 !.env.example
+.llm-router.local.json
+.llm-router.*.json
 npm-debug.log*

@@ -7,22 +7,28 @@ import { ModelRegistry } from "./modelRegistry.js";
 import { FetchUpstreamClient, UpstreamClient, UpstreamError, UpstreamStreamResponse } from "./upstream.js";
 import { openAIError, RouterError, sanitizeErrorMessage } from "./errors.js";
 import { logEvent } from "./logger.js";
+import { RuntimeConfigStore } from "./runtimeConfig.js";
+import { adminPageHtml } from "./adminPage.js";
 
 export interface AppState {
   config: AppConfig;
   upstream: UpstreamClient;
   registry: ModelRegistry;
+  runtimeConfig: RuntimeConfigStore;
   engine: RouterEngine;
 }
 
 export async function createAppState(config: AppConfig, upstream: UpstreamClient = new FetchUpstreamClient(config)): Promise<AppState> {
+  const runtimeConfig = new RuntimeConfigStore(config.runtimeConfigPath);
+  await runtimeConfig.load();
   const models = await upstream.listModels();
   const registry = new ModelRegistry(models);
   return {
     config,
     upstream,
     registry,
-    engine: new RouterEngine(config, upstream, registry)
+    runtimeConfig,
+    engine: new RouterEngine(config, upstream, registry, runtimeConfig)
   };
 }
 
@@ -33,14 +39,40 @@ export function createHttpServer(state: AppState) {
     res.setHeader("x-llm-router-request-id", requestId);
 
     try {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/admin" || url.pathname === "/config")) {
+        sendHtml(res, 200, adminPageHtml());
+        return;
+      }
+
       if (!authorize(req, state.config)) {
         sendJson(res, 401, openAIError(401, "authentication_error", "Invalid router API key", "authentication_error").body);
         return;
       }
 
-      const url = new URL(req.url ?? "/", "http://localhost");
       if (req.method === "GET" && url.pathname === "/health") {
         sendJson(res, 200, { status: "ok", models: state.registry.allIds().length });
+        return;
+      }
+
+      if (req.method === "GET" && (url.pathname === "/admin/config" || url.pathname === "/config/runtime")) {
+        sendJson(res, 200, adminConfigResponse(state));
+        return;
+      }
+
+      if ((req.method === "POST" || req.method === "PUT") && (url.pathname === "/admin/config" || url.pathname === "/config/runtime")) {
+        const body = await readJson(req);
+        const routerModelId = parseRouterModelId(body);
+        if (routerModelId && !state.registry.hasModel(routerModelId)) {
+          throw new RouterError(400, "invalid_router_model", `Router model '${routerModelId}' was not found in upstream model list`);
+        }
+        await state.runtimeConfig.update(routerModelId ? { routerModelId } : {});
+        logEvent({
+          request_id: requestId,
+          event: "admin_config_updated",
+          router_model: routerModelId ?? "automatic"
+        });
+        sendJson(res, 200, adminConfigResponse(state));
         return;
       }
 
@@ -128,7 +160,8 @@ function authorize(req: IncomingMessage, config: AppConfig): boolean {
     return true;
   }
   const header = req.headers.authorization;
-  return header === `Bearer ${config.routerApiKey}`;
+  const keyHeader = req.headers["x-router-api-key"];
+  return header === `Bearer ${config.routerApiKey}` || keyHeader === config.routerApiKey;
 }
 
 function modelsResponse(upstreamModels: OpenAIModel[]) {
@@ -165,6 +198,56 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
+}
+
+function sendHtml(res: ServerResponse, status: number, body: string): void {
+  res.statusCode = status;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.end(body);
+}
+
+function adminConfigResponse(state: AppState) {
+  const current = state.runtimeConfig.get();
+  const automaticRouterModel = state.registry.cheapestPricedModel();
+  const configuredRouterModel = current.routerModelId ? state.registry.get(current.routerModelId) : undefined;
+  const effectiveRouterModel = current.routerModelId ? configuredRouterModel : automaticRouterModel;
+
+  return {
+    router_model_mode: current.routerModelId ? "manual" : "automatic",
+    router_model_id: current.routerModelId ?? null,
+    automatic_router_model_id: automaticRouterModel?.model.id ?? null,
+    effective_router_model_id: effectiveRouterModel?.model.id ?? null,
+    configured_router_model_available: current.routerModelId ? Boolean(configuredRouterModel) : true,
+    models: state.registry.all().map((entry) => ({
+      id: entry.model.id,
+      price: entry.price
+        ? {
+            input_usd_per_1m_tokens: entry.price.inputUsdPer1MTokens,
+            output_usd_per_1m_tokens: entry.price.outputUsdPer1MTokens,
+            source: entry.price.source
+          }
+        : null,
+      is_automatic_router_model: entry.model.id === automaticRouterModel?.model.id,
+      is_effective_router_model: entry.model.id === effectiveRouterModel?.model.id
+    }))
+  };
+}
+
+function parseRouterModelId(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") {
+    throw new RouterError(400, "invalid_request_error", "Request body must be a JSON object");
+  }
+
+  const value = (body as { router_model_id?: unknown; routerModelId?: unknown }).router_model_id ?? (body as { routerModelId?: unknown }).routerModelId;
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new RouterError(400, "invalid_request_error", "router_model_id must be a string or null");
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 async function sendEventStream(res: ServerResponse, stream: UpstreamStreamResponse, abortController: AbortController): Promise<void> {

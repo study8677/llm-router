@@ -22,6 +22,10 @@ export class ModelRegistry {
     return this.pricedModels.some((entry) => entry.model.id === id);
   }
 
+  get(id: string): PricedModel | undefined {
+    return this.pricedModels.find((entry) => entry.model.id === id);
+  }
+
   cheapestPricedModel(excluded = new Set<string>()): PricedModel | undefined {
     return this.pricedModels
       .filter((entry) => entry.price && !excluded.has(entry.model.id))

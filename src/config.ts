@@ -68,6 +68,7 @@ export function loadConfig(): AppConfig {
     upstreamBaseUrl: normalizeBaseUrl(requiredEnv("UPSTREAM_BASE_URL")),
     upstreamApiKey: requiredEnv("UPSTREAM_API_KEY"),
     routerApiKey: process.env.ROUTER_API_KEY?.trim() || undefined,
+    runtimeConfigPath: process.env.LLM_ROUTER_CONFIG_PATH?.trim() || ".llm-router.local.json",
     upstreamTimeoutMs: intEnv("UPSTREAM_TIMEOUT_MS", 30_000),
     autoMaxAttempts: intEnv("AUTO_MAX_ATTEMPTS", 2)
   };

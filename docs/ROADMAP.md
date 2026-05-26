@@ -8,6 +8,7 @@ LLM Router is currently an MVP focused on one upstream key and intelligent model
 - Common client config helpers.
 - Better model capability catalog.
 - More live routing evaluation cases.
+- Richer local Admin page for routing policy previews.
 - Optional Docker image publishing.
 
 ## Protocol compatibility
@@ -37,4 +38,4 @@ LLM Router is currently an MVP focused on one upstream key and intelligent model
 - SaaS multi-tenant control plane.
 - Multi-upstream load balancing.
 - Billing system.
-- Admin dashboard.
+- SaaS admin dashboard.

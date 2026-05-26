@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AppConfig, ChatCompletionRequest, OpenAIModel } from "../src/types.js";
 import { ModelRegistry } from "../src/modelRegistry.js";
 import { RouterEngine } from "../src/routerEngine.js";
@@ -10,6 +13,7 @@ const config: AppConfig = {
   port: 0,
   upstreamBaseUrl: "https://relay.test",
   upstreamApiKey: "sk-test-secret",
+  runtimeConfigPath: join(tmpdir(), `llm-router-test-${process.pid}-${Date.now()}.json`),
   upstreamTimeoutMs: 1000,
   autoMaxAttempts: 2
 };
@@ -35,7 +39,7 @@ class MockUpstream implements UpstreamClient {
   async chatCompletions(body: ChatCompletionRequest): Promise<unknown> {
     this.calls.push(body);
 
-    if (body.model === "gpt-4.1-nano" && isRouterRequest(body)) {
+    if (isRouterRequest(body)) {
       return {
         choices: [
           {
@@ -128,6 +132,33 @@ test("unknown-price model is not chosen as router model", async () => {
 
   assert.equal(upstream.calls[0].model, "gpt-4.1-nano");
   assert.notEqual(upstream.calls[0].model, "unknown-price-model");
+});
+
+test("configured router model is used for auto routing", async () => {
+  const upstream = new MockUpstream();
+  const engine = new RouterEngine(config, upstream, new ModelRegistry(models), { get: () => ({ routerModelId: "expensive-answer" }) });
+
+  const result = await engine.handleChatCompletion(
+    { model: "auto", messages: [{ role: "user", content: "hello" }] },
+    "req_configured_router"
+  );
+
+  assert.equal(result.targetModel, "expensive-answer");
+  assert.equal(upstream.calls.length, 2);
+  assert.equal(upstream.calls[0].model, "expensive-answer");
+  assert.equal(isRouterRequest(upstream.calls[0]), true);
+  assert.equal(upstream.calls[1].model, "expensive-answer");
+});
+
+test("configured router model is validated against upstream model list", async () => {
+  const upstream = new MockUpstream();
+  const engine = new RouterEngine(config, upstream, new ModelRegistry(models), { get: () => ({ routerModelId: "missing-router" }) });
+
+  await assert.rejects(
+    () => engine.handleChatCompletion({ model: "auto", messages: [{ role: "user", content: "hello" }] }, "req_missing_router"),
+    /configured_router_model_unavailable|missing-router/
+  );
+  assert.equal(upstream.calls.length, 0);
 });
 
 test("invalid router target is rejected", async () => {
@@ -439,7 +470,7 @@ test("auto multimodal routing redacts base64 images while final request stays un
 
 test("http /v1/models includes virtual models and upstream models", async () => {
   const upstream = new MockUpstream();
-  const state = await createAppState(config, upstream);
+  const state = await createAppState(freshConfig(), upstream);
   const server = createHttpServer(state);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const address = server.address();
@@ -460,7 +491,7 @@ test("http /v1/models includes virtual models and upstream models", async () => 
 
 test("http /v1/chat/completions supports stream true", async () => {
   const upstream = new MockUpstream();
-  const state = await createAppState(config, upstream);
+  const state = await createAppState(freshConfig(), upstream);
   const server = createHttpServer(state);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const address = server.address();
@@ -486,8 +517,150 @@ test("http /v1/chat/completions supports stream true", async () => {
   }
 });
 
+test("http /admin serves local config page", async () => {
+  const upstream = new MockUpstream();
+  const state = await createAppState(freshConfig({ routerApiKey: "local-secret" }), upstream);
+  const server = createHttpServer(state);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/admin`);
+    const text = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+    assert.match(text, /LLM Router Admin/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("http admin config can set manual router model", async () => {
+  const upstream = new MockUpstream();
+  const state = await createAppState(freshConfig(), upstream);
+  const server = createHttpServer(state);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const saveResponse = await fetch(`${baseUrl}/admin/config`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ router_model_id: "expensive-answer" })
+    });
+    const saveBody = (await saveResponse.json()) as { router_model_mode: string; effective_router_model_id: string };
+
+    assert.equal(saveResponse.status, 200);
+    assert.equal(saveBody.router_model_mode, "manual");
+    assert.equal(saveBody.effective_router_model_id, "expensive-answer");
+
+    const chatResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "auto", messages: [{ role: "user", content: "hello" }] })
+    });
+
+    assert.equal(chatResponse.status, 200);
+    assert.equal(upstream.calls[0].model, "expensive-answer");
+    assert.equal(isRouterRequest(upstream.calls[0]), true);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("http admin config rejects unknown router model", async () => {
+  const upstream = new MockUpstream();
+  const state = await createAppState(freshConfig(), upstream);
+  const server = createHttpServer(state);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/admin/config`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ router_model_id: "missing-model" })
+    });
+    const body = (await response.json()) as { error: { code: string; message: string } };
+
+    assert.equal(response.status, 400);
+    assert.equal(body.error.code, "invalid_router_model");
+    assert.match(body.error.message, /missing-model/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("http admin config API uses router API key while page stays openable", async () => {
+  const upstream = new MockUpstream();
+  const state = await createAppState(freshConfig({ routerApiKey: "local-secret" }), upstream);
+  const server = createHttpServer(state);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const pageResponse = await fetch(`${baseUrl}/admin`);
+    const deniedResponse = await fetch(`${baseUrl}/admin/config`);
+    const allowedResponse = await fetch(`${baseUrl}/admin/config`, {
+      headers: { "x-router-api-key": "local-secret" }
+    });
+    const allowedBody = (await allowedResponse.json()) as { automatic_router_model_id: string };
+
+    assert.equal(pageResponse.status, 200);
+    assert.equal(deniedResponse.status, 401);
+    assert.equal(allowedResponse.status, 200);
+    assert.equal(allowedBody.automatic_router_model_id, "gpt-4.1-nano");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("http admin config exposes unavailable saved router model", async () => {
+  const upstream = new MockUpstream();
+  const savedConfig = freshConfig();
+  await writeFile(savedConfig.runtimeConfigPath, JSON.stringify({ router_model_id: "missing-router" }), "utf8");
+  const state = await createAppState(savedConfig, upstream);
+  const server = createHttpServer(state);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/admin/config`);
+    const body = (await response.json()) as {
+      router_model_mode: string;
+      router_model_id: string;
+      effective_router_model_id: string | null;
+      configured_router_model_available: boolean;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.router_model_mode, "manual");
+    assert.equal(body.router_model_id, "missing-router");
+    assert.equal(body.effective_router_model_id, null);
+    assert.equal(body.configured_router_model_available, false);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
 function isRouterRequest(body: ChatCompletionRequest): boolean {
   return Array.isArray(body.messages) && JSON.stringify(body.messages).includes("candidate_models");
+}
+
+function freshConfig(overrides: Partial<AppConfig> = {}): AppConfig {
+  return {
+    ...config,
+    runtimeConfigPath: join(tmpdir(), `llm-router-test-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`),
+    ...overrides
+  };
 }
 
 function streamFromText(text: string): ReadableStream<Uint8Array> {

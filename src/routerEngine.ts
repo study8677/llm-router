@@ -2,12 +2,12 @@ import { RouterError } from "./errors.js";
 import { logEvent } from "./logger.js";
 import { ModelRegistry } from "./modelRegistry.js";
 import { UpstreamClient, UpstreamError, UpstreamStreamResponse } from "./upstream.js";
-import { AppConfig, ChatCompletionRequest, PricedModel, RouteAttempt, RouterDecision, VirtualModel } from "./types.js";
+import { AppConfig, ChatCompletionRequest, PricedModel, RouteAttempt, RouterDecision, RuntimeConfigProvider, VirtualModel } from "./types.js";
 
 const ROUTER_SYSTEM_PROMPT = `You are an internal LLM routing policy engine.
 You must not answer the user's task.
 Your job is to directly choose the best final answer model for the request.
-The cheapest router model is only used for routing; do not choose yourself just because you are cheap.
+The router model is only used for routing; do not choose yourself just because you are cheap or currently configured for routing.
 Use the candidate_model_details as your source of truth for model strength and specialties.
 
 Routing principles:
@@ -36,11 +36,16 @@ interface FinalRoute {
   routeReason: string;
 }
 
+const DEFAULT_RUNTIME_CONFIG: RuntimeConfigProvider = {
+  get: () => ({})
+};
+
 export class RouterEngine {
   constructor(
     private readonly config: AppConfig,
     private readonly upstream: UpstreamClient,
-    private readonly registry: ModelRegistry
+    private readonly registry: ModelRegistry,
+    private readonly runtimeConfig: RuntimeConfigProvider = DEFAULT_RUNTIME_CONFIG
   ) {}
 
   async handleChatCompletion(body: ChatCompletionRequest, requestId: string): Promise<{ response: unknown; targetModel: string; attempts: RouteAttempt[] }> {
@@ -100,7 +105,7 @@ export class RouterEngine {
     let lastError: UpstreamError | RouterError | undefined;
 
     for (let attempt = 0; attempt < this.config.autoMaxAttempts; attempt += 1) {
-      const decision = await this.routeWithCheapestModel(originalBody, virtualModel, requestId, excluded);
+      const decision = await this.routeWithRouterModel(originalBody, virtualModel, requestId, excluded);
       const finalRoute = finalizeRouterDecision(decision, candidateModelIds(this.registry, excluded));
       const targetModel = finalRoute.targetModel;
       const started = Date.now();
@@ -130,7 +135,7 @@ export class RouterEngine {
             request_id: requestId,
             event: "auto_answer_failed",
             original_model: virtualModel,
-            router_model: this.getRouterModelId(excluded),
+            router_model: this.getRouterModelId(),
             target_model: targetModel,
             error: error.code,
             status: error.status
@@ -161,7 +166,7 @@ export class RouterEngine {
     let lastError: UpstreamError | RouterError | undefined;
 
     for (let attempt = 0; attempt < this.config.autoMaxAttempts; attempt += 1) {
-      const decision = await this.routeWithCheapestModel(originalBody, virtualModel, requestId, excluded);
+      const decision = await this.routeWithRouterModel(originalBody, virtualModel, requestId, excluded);
       const finalRoute = finalizeRouterDecision(decision, candidateModelIds(this.registry, excluded));
       const targetModel = finalRoute.targetModel;
       const started = Date.now();
@@ -193,7 +198,7 @@ export class RouterEngine {
             request_id: requestId,
             event: "auto_stream_answer_failed",
             original_model: virtualModel,
-            router_model: this.getRouterModelId(excluded),
+            router_model: this.getRouterModelId(),
             target_model: targetModel,
             error: error.code,
             status: error.status
@@ -213,14 +218,18 @@ export class RouterEngine {
     throw new RouterError(503, "no_available_model", "No available target model for auto routing");
   }
 
-  private async routeWithCheapestModel(
+  private async routeWithRouterModel(
     originalBody: ChatCompletionRequest,
     virtualModel: VirtualModel,
     requestId: string,
     excludedTargets: Set<string>
   ): Promise<RouterDecision> {
-    const routerModel = this.registry.cheapestPricedModel();
-    if (!routerModel?.price) {
+    const configuredRouterModelId = this.runtimeConfig.get().routerModelId;
+    const routerModel = this.resolveRouterModel();
+    if (!routerModel) {
+      throw new RouterError(503, "no_priced_router_model", "No priced model is available to act as the auto router model");
+    }
+    if (!configuredRouterModelId && !routerModel.price) {
       throw new RouterError(503, "no_priced_router_model", "No priced model is available to act as the auto router model");
     }
 
@@ -287,8 +296,20 @@ export class RouterEngine {
     return decision;
   }
 
-  private getRouterModelId(_excludedTargets: Set<string>): string | undefined {
-    return this.registry.cheapestPricedModel()?.model.id;
+  private getRouterModelId(): string | undefined {
+    return this.resolveRouterModel()?.model.id;
+  }
+
+  private resolveRouterModel(): PricedModel | undefined {
+    const configured = this.runtimeConfig.get().routerModelId;
+    if (configured) {
+      const model = this.registry.get(configured);
+      if (!model) {
+        throw new RouterError(503, "configured_router_model_unavailable", `Configured router model '${configured}' was not found in upstream model list`);
+      }
+      return model;
+    }
+    return this.registry.cheapestPricedModel();
   }
 }
 

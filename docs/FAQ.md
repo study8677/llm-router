@@ -16,6 +16,10 @@ No. The router model only returns JSON that selects the final target model. The 
 
 Yes. Send a real upstream model ID instead of `auto`, `auto-coding`, or `auto-longtext`.
 
+## Can I choose the router model used by auto?
+
+Yes. Open `http://127.0.0.1:8787/admin` and switch router-model selection from automatic to manual. This only changes the internal routing decision model; the final answer is still a separate call to the selected target model.
+
 ## Does it support streaming?
 
 Yes. `stream: true` is supported for Chat Completions. The router first makes a non-streaming route decision, then proxies the selected upstream SSE stream.
@@ -40,7 +44,7 @@ The router sanitizes error messages and ignores `.env` by default. You should st
 
 ## Is the price catalog a billing source of truth?
 
-No. It is only used to choose the cheapest known-price router model. Your real bill still comes from the upstream provider or relay.
+No. It is only used for the default cheapest known-price router-model selection and routing context. Your real bill still comes from the upstream provider or relay.
 
 ## Why not always use the strongest model?
 

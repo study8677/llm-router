@@ -12,7 +12,7 @@ This document describes the expected behavior of `auto`, `auto-coding`, and `aut
 
 ## Router model selection
 
-The router model is selected automatically at startup:
+By default, the router model is selected automatically:
 
 1. Load upstream models from `/v1/models`.
 2. Resolve pricing from upstream metadata.
@@ -20,6 +20,14 @@ The router model is selected automatically at startup:
 4. Pick the cheapest model whose price is known.
 
 Models with unknown price are still valid answer candidates, but cannot become the cheapest router model.
+
+You can override this from the local Admin page at `/admin`, or by posting to `/admin/config`:
+
+```json
+{ "router_model_id": "gpt-5.5" }
+```
+
+When a router model is manually configured, it must exist in the upstream model list. Manual configuration can use a model whose price is unknown because the user is explicitly overriding the default cost-saving policy.
 
 ## Decision schema
 

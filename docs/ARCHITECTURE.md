@@ -7,7 +7,7 @@ flowchart LR
   Client["Client SDK / chat app"] --> Router["LLM Router"]
   Router --> Registry["Model registry"]
   Registry --> UpstreamModels["Upstream /v1/models"]
-  Router --> RouteModel["Cheapest known-price router model"]
+  Router --> RouteModel["Router model<br/>auto cheapest or manual"]
   RouteModel --> Decision["Routing JSON"]
   Decision --> Router
   Router --> AnswerModel["Selected answer model"]
@@ -19,7 +19,7 @@ flowchart LR
 1. The client calls `POST /v1/chat/completions`.
 2. If `model` is a real upstream model ID, the request is forwarded directly.
 3. If `model` is `auto`, `auto-coding`, or `auto-longtext`, the router builds an internal routing request.
-4. The routing request is sent to the cheapest model with known pricing.
+4. The routing request is sent to the configured router model. By default, this is the cheapest model with known pricing; the local Admin page can override it.
 5. The router validates the returned JSON.
 6. The original request is forwarded to the selected target model with only `model` replaced.
 
@@ -30,7 +30,7 @@ For streaming requests, the route decision is still non-streaming. After the tar
 - The router model never answers the user.
 - The answer model call is always a separate call.
 - Manual model IDs bypass routing.
-- Unknown-price models may answer, but cannot be selected as the cheapest router model.
+- Unknown-price models may answer. They cannot be selected by the default cheapest-router policy, but can be used when the user manually configures them as the router model.
 - Invalid `target_model` values are rejected.
 - API keys are sanitized from error messages.
 
